@@ -141,39 +141,58 @@ def main(args):
     model.eval(inference=True)
 
     with torch.no_grad():
-        mel = torch.from_numpy(np.load(args.input))
+
+        mel = torch.from_numpy(np.load(mel))
         if len(mel.shape) == 2:
             mel = mel.unsqueeze(0)
         mel = mel.cuda()
-        mel = mel.view(1, -1, 80)
-        mel = fold_with_overlap(mel, target = 2, overlap = 1)
+        print(mel.shape, "Shape of mel when loaded")
+        mel = mel.transpose(2, 1)
+
+        mel = fold_with_overlap(mel, target = 1000, overlap = 500)
+
         print(mel.shape, "Shape of mel after fold with overlap")   #n_fold, 4, 80
+
         num_folds, column = mel.shape[0] , mel.shape[1]
         y = []
         for i in range(0, num_folds):
             input_mel = mel[i,:,:]
-            input_mel = input_mel.squeeze(0)
+            input_mel = input_mel.transpose(1,0)
+            input_mel = input_mel.unsqueeze(0)
+            #print(input_mel.shape, "Shape of Input Mel")
             audio = model.inference(input_mel)
-            y.append(audio)
-        y = np.array(y)
-        print(y.shape,"Shape of y before passing into xfade_and_unfold")  #n_fold, 4
-        y = y.reshape(num_folds, column)
-        audio = xfade_and_unfold(y, target = 2, overlap = 1)
-        audio = audio.unsqueeze(0)
-        # For multi-band inference
-        if hp.model.out_channels > 1:
-            pqmf = PQMF()
-            audio = pqmf.synthesis(audio).view(-1)
-        audio = audio.squeeze(0)  # collapse all dimension except time axis
-        if args.d:
-            denoiser = Denoiser(model).cuda()
-            audio = denoiser(audio, 0.1)
-        audio = audio.squeeze()
-        audio = audio[:-(hp.audio.hop_length*10)]
-        audio = MAX_WAV_VALUE * audio
-        audio = audio.clamp(min=-MAX_WAV_VALUE, max=MAX_WAV_VALUE-1)
-        audio = audio.short()
-        audio = audio.cpu().detach().numpy()
+            #print(audio.squeeze().shape, "Shape of Audio")
+            if hp.model.out_channels > 1:
+                pqmf = PQMF()
+                audio = pqmf.synthesis(audio).view(-1)
+            audio = audio.squeeze(0)  # collapse all dimension except time axis
+            if denoising:
+                denoiser = Denoiser(model).cuda()
+                audio = denoiser(audio, 0.01)
+            #print(audio.shape)
+            audio = audio.squeeze()
+            #print(audio.shape)
+            audio = audio.view(1,-1)
+            audio = audio.squeeze()
+            print(audio.shape, "Final audio Shape")
+
+            audio = audio[:-(hp.audio.hop_length*10)]
+            audio = MAX_WAV_VALUE * audio
+            audio = audio.clamp(min=-MAX_WAV_VALUE, max=MAX_WAV_VALUE-1)
+            audio = audio.short()
+            #audio = audio.cpu().detach().numpy()
+
+            y.append(audio.squeeze())
+
+        out = torch.stack(y)
+
+        print(out.shape, "Out shape")
+        #print(y.shape,"Shape of y before passing into xfade_and_unfold")  #n_fold, 4
+        #y = y.reshape(num_folds, column)
+
+        audio = xfade_and_unfold(out.cpu().numpy().astype('float64'), target = 1000, overlap = 500)
+        print(audio.shape, "Shape of audio after xfade and unfold")
+        audio = audio.astype('int16')
 
         out_path = args.input.replace('.npy', '_reconstructed_epoch%04d.wav' % checkpoint['epoch'])
         write(out_path, hp.audio.sampling_rate, audio)
