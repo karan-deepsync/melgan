@@ -145,6 +145,10 @@ def main(args):
         if len(mel.shape) == 2:
             mel = mel.unsqueeze(0)
         mel = mel.cuda()
+        mel = mel.view(1, -1, 80)
+        mel = fold_with_overlap(mel, target = 2, overlap = 1)
+        print(mel.shape, "Shape of mel after fold with overlap")
+        
         audio = model.inference(mel)
         # For multi-band inference
         if hp.model.out_channels > 1:
