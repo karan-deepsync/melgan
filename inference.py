@@ -147,9 +147,19 @@ def main(args):
         mel = mel.cuda()
         mel = mel.view(1, -1, 80)
         mel = fold_with_overlap(mel, target = 2, overlap = 1)
-        print(mel.shape, "Shape of mel after fold with overlap")
-        
-        audio = model.inference(mel)
+        print(mel.shape, "Shape of mel after fold with overlap")   #n_fold, 4, 80
+        num_folds, column = mel.shape[0] , mel.shape[1]
+        y = []
+        for i in range(0, num_folds):
+            input_mel = mel[i,:,:]
+            input_mel = input_mel.squeeze(0)
+            audio = model.inference(input_mel)
+            y.append(audio)
+        y = np.array(y)
+        print(y.shape,"Shape of y before passing into xfade_and_unfold")  #n_fold, 4
+        y = y.reshape(num_folds, column)
+        audio = xfade_and_unfold(y, target = 2, overlap = 1)
+        audio = audio.unsqueeze(0)
         # For multi-band inference
         if hp.model.out_channels > 1:
             pqmf = PQMF()
